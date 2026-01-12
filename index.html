@@ -1,0 +1,361 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Image as ImageIcon, 
+  Layout, 
+  Type, 
+  Download, 
+  Sparkles, 
+  Layers, 
+  Maximize, 
+  Settings,
+  Facebook,
+  Youtube,
+  Smartphone,
+  Info,
+  Sun,
+  Moon,
+  Upload,
+  X,
+  RefreshCw
+} from 'lucide-react';
+
+const App = () => {
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [prompt, setPrompt] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedImage, setGeneratedImage] = useState(null);
+  const [selectedSize, setSelectedSize] = useState('1080x1350');
+  const [error, setError] = useState(null);
+  const [refImage, setRefImage] = useState(null);
+  const [refImageBase64, setRefImageBase64] = useState(null);
+  const fileInputRef = useRef(null);
+
+  // API Key placeholder
+  const apiKey = ""; 
+
+  const AD_SIZES = [
+    { id: '1080x1350', name: 'Facebook/Insta Post', width: 1080, height: 1350, icon: <Facebook className="w-4 h-4" /> },
+    { id: '1080x1920', name: 'Reels / Stories', width: 1080, height: 1920, icon: <Smartphone className="w-4 h-4" /> },
+    { id: '1280x720', name: 'YouTube Thumbnail', width: 1280, height: 720, icon: <Youtube className="w-4 h-4" /> },
+    { id: '1080x1080', name: 'Square Ad', width: 1080, height: 1080, icon: <Layout className="w-4 h-4" /> },
+    { id: '1200x628', name: 'FB Landscape Ad', width: 1200, height: 628, icon: <Facebook className="w-4 h-4" /> },
+    { id: '1920x1080', name: 'Full HD Presentation', width: 1920, height: 1080, icon: <Maximize className="w-4 h-4" /> },
+    { id: '1080x720', name: 'Standard Ad (3:2)', width: 1080, height: 720, icon: <ImageIcon className="w-4 h-4" /> },
+  ];
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setRefImage(URL.createObjectURL(file));
+        setRefImageBase64(reader.result.split(',')[1]);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const clearRefImage = () => {
+    setRefImage(null);
+    setRefImageBase64(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const generateImage = async () => {
+    if (!prompt) {
+      setError("ကျေးဇူးပြု၍ စာသား (Prompt) အရင်ရိုက်ထည့်ပါ။");
+      return;
+    }
+
+    if (!apiKey) {
+      setError("API Key ထည့်သွင်းရန် လိုအပ်ပါသည်။ (Vercel Environment Variables တွင် ထည့်သွင်းပါ)");
+      return;
+    }
+
+    setIsGenerating(true);
+    setError(null);
+
+    const size = AD_SIZES.find(s => s.id === selectedSize);
+    const fullPrompt = `${prompt}. Professional advertisement style, high resolution, 4k, cinematic lighting. Aspect ratio: ${size.width}:${size.height}`;
+
+    try {
+      let retryCount = 0;
+      const maxRetries = 5;
+      
+      const attemptFetch = async () => {
+        let endpoint, body;
+
+        // Use Image-to-Image if reference photo is provided
+        if (refImageBase64) {
+          endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${apiKey}`;
+          body = {
+            contents: [{
+              parts: [
+                { text: `Create a new professional advertisement image inspired by the attached image. Description: ${fullPrompt}` },
+                { inlineData: { mimeType: "image/png", data: refImageBase64 } }
+              ]
+            }],
+            generationConfig: { responseModalities: ['IMAGE'] }
+          };
+        } else {
+          // Standard Text-to-Image
+          endpoint = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`;
+          body = {
+            instances: [{ prompt: fullPrompt }],
+            parameters: { sampleCount: 1 }
+          };
+        }
+
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!response.ok) {
+          if (response.status === 429 && retryCount < maxRetries) {
+            retryCount++;
+            const delay = Math.pow(2, retryCount) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return attemptFetch();
+          }
+          throw new Error('Image generation failed. Please check your API key.');
+        }
+        return response.json();
+      };
+
+      const result = await attemptFetch();
+      let base64Data;
+      
+      if (refImageBase64) {
+        base64Data = result.candidates?.[0]?.content?.parts?.find(p => p.inlineData)?.inlineData?.data;
+      } else {
+        base64Data = result.predictions[0].bytesBase64Encoded;
+      }
+
+      if (base64Data) {
+        setGeneratedImage(`data:image/png;base64,${base64Data}`);
+      } else {
+        throw new Error("No image data received from AI.");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!generatedImage) return;
+    const link = document.createElement('a');
+    link.href = generatedImage;
+    link.download = `GTS-Family-AI-Ad-${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className={`min-h-screen transition-colors duration-300 ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900'}`}>
+      {/* Header */}
+      <nav className={`border-b sticky top-0 z-50 backdrop-blur-md ${isDarkMode ? 'border-slate-800 bg-slate-900/80' : 'border-slate-200 bg-white/80'}`}>
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-2 rounded-lg">
+              <Sparkles className="text-white w-6 h-6" />
+            </div>
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-400">
+              GTS FAMILY <span className={`${isDarkMode ? 'text-slate-400' : 'text-slate-500'} font-light`}>AI Ads Maker</span>
+            </h1>
+          </div>
+          
+          <button 
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className={`p-2 rounded-full transition-colors ${isDarkMode ? 'bg-slate-800 hover:bg-slate-700 text-yellow-400' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}
+          >
+            {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+        </div>
+      </nav>
+
+      <main className="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* Left Side: Controls */}
+        <div className="lg:col-span-4 space-y-6">
+          
+          {/* Reference Photo Upload */}
+          <section className={`rounded-2xl p-6 border transition-colors shadow-xl ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2 text-blue-500">
+                <Upload className="w-5 h-5" />
+                <h2 className="font-semibold text-lg">Reference Photo</h2>
+              </div>
+              {refImage && (
+                <button onClick={clearRefImage} className="text-red-500 hover:bg-red-500/10 p-1 rounded-md">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            
+            {!refImage ? (
+              <div 
+                onClick={() => fileInputRef.current.click()}
+                className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-colors ${isDarkMode ? 'border-slate-800 hover:border-slate-600 bg-slate-950' : 'border-slate-300 hover:border-blue-400 bg-slate-50'}`}
+              >
+                <input type="file" ref={fileInputRef} onChange={handleImageUpload} className="hidden" accept="image/*" />
+                <ImageIcon className="w-8 h-8 mx-auto mb-2 text-slate-400" />
+                <p className="text-xs text-slate-500">ပုံစံတူယူရန် ဓာတ်ပုံတင်ပါ (Optional)</p>
+              </div>
+            ) : (
+              <div className="relative rounded-xl overflow-hidden aspect-video border border-slate-700">
+                <img src={refImage} alt="Ref" className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                   <p className="text-white text-xs font-medium">Photo Loaded</p>
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className={`rounded-2xl p-6 border transition-colors shadow-xl ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-2 mb-4 text-purple-500">
+              <Type className="w-5 h-5" />
+              <h2 className="font-semibold text-lg">ကြော်ငြာအကြောင်းအရာ</h2>
+            </div>
+            <textarea 
+              className={`w-full rounded-xl p-4 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all min-h-[100px] resize-none border ${isDarkMode ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'}`}
+              placeholder="ဥပမာ- A professional luxury cosmetics ad with gold accents..."
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </section>
+
+          <section className={`rounded-2xl p-6 border transition-colors shadow-xl ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center gap-2 mb-4 text-emerald-500">
+              <Layers className="w-5 h-5" />
+              <h2 className="font-semibold text-lg">အရွယ်အစား</h2>
+            </div>
+            <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+              {AD_SIZES.map((size) => (
+                <button
+                  key={size.id}
+                  onClick={() => setSelectedSize(size.id)}
+                  className={`flex items-center justify-between p-3 rounded-xl border transition-all ${
+                    selectedSize === size.id 
+                    ? 'bg-blue-600/10 border-blue-500 text-blue-500 font-bold' 
+                    : `${isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'}`
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {size.icon}
+                    <span className="text-sm">{size.name}</span>
+                  </div>
+                  <span className="text-[10px] opacity-60">{size.width}x{size.height}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <button 
+            onClick={generateImage}
+            disabled={isGenerating}
+            className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg ${
+              isGenerating 
+              ? 'bg-slate-700 cursor-not-allowed text-slate-400' 
+              : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white active:scale-[0.98]'
+            }`}
+          >
+            {isGenerating ? (
+              <>
+                <RefreshCw className="w-5 h-5 animate-spin" />
+                ဖန်တီးနေသည်...
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-5 h-5" />
+                Ads Photo ဖန်တီးမည်
+              </>
+            )}
+          </button>
+
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-xl flex items-start gap-3 text-sm">
+              <Info className="w-5 h-5 shrink-0" />
+              <p>{error}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Right Side: Preview Area */}
+        <div className="lg:col-span-8">
+          <div className={`rounded-3xl overflow-hidden min-h-[500px] flex flex-col shadow-2xl border transition-colors ${isDarkMode ? 'bg-slate-900 border-slate-800 shadow-black' : 'bg-white border-slate-200 shadow-slate-200'}`}>
+            <div className={`p-4 border-b flex items-center justify-between ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-slate-50'}`}>
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1.5">
+                  <div className="w-3 h-3 rounded-full bg-red-400" />
+                  <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                  <div className="w-3 h-3 rounded-full bg-green-400" />
+                </div>
+                <span className={`ml-4 text-xs font-mono ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                  RESULT: {selectedSize} {refImageBase64 ? '(Ref Mode)' : '(Text Mode)'}
+                </span>
+              </div>
+              {generatedImage && (
+                <button 
+                  onClick={handleDownload}
+                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm transition-colors shadow-lg shadow-blue-500/20"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+              )}
+            </div>
+
+            <div className={`flex-1 p-8 flex items-center justify-center ${isDarkMode ? 'bg-[radial-gradient(#1e293b_1px,transparent_1px)]' : 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)]'} [background-size:20px_20px]`}>
+              {generatedImage ? (
+                <div className="relative group shadow-2xl max-w-full">
+                  <img 
+                    src={generatedImage} 
+                    alt="AI Generated Ad" 
+                    className="max-h-[70vh] w-auto rounded-lg shadow-2xl transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded-lg" />
+                </div>
+              ) : (
+                <div className="text-center space-y-4 max-w-sm">
+                  <div className={`w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-6 ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                    <ImageIcon className={`w-12 h-12 ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`} />
+                  </div>
+                  <h3 className={`text-xl font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Canvas အဆင်သင့်ဖြစ်ပါပြီ</h3>
+                  <p className={`text-sm leading-relaxed ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                    သင်တင်ထားတဲ့ Reference Photo သို့မဟုတ် စာသားပေါ်အခြေခံပြီး AI က ကြော်ငြာပုံရိပ်တွေကို စက္ကန့်ပိုင်းအတွင်း ဖန်တီးပေးပါလိမ့်မယ်။
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-4 justify-center md:justify-start">
+             <div className={`flex items-center gap-2 text-[10px] uppercase tracking-wider font-bold px-4 py-2 rounded-full border ${isDarkMode ? 'bg-slate-900/50 border-slate-800 text-slate-500' : 'bg-slate-100 border-slate-200 text-slate-500'}`}>
+               <Settings className="w-3 h-3" />
+               GTS FAMILY Engine v2.0 • Light & Dark Hybrid
+             </div>
+          </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className={`py-8 text-center text-xs border-t transition-colors ${isDarkMode ? 'border-slate-900 text-slate-600' : 'border-slate-200 text-slate-400'}`}>
+        <p>© 2026 GTS FAMILY AI ADS PHOTO MAKER. All Rights Reserved.</p>
+      </footer>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+      `}} />
+    </div>
+  );
+};
+
+export default App;
+
